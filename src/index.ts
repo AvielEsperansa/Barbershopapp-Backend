@@ -31,10 +31,10 @@ async function main() {
         }));
 
         // API Routes
-        app.use('/api/users', userRoutes);
-        app.use('/api/appointments', appointmentRoutes);
-        app.use('/api/services', serviceRoutes);
-        app.use('/api/working-hours', workingHoursRoutes);
+        app.use('/users', userRoutes);
+        app.use('/appointments', appointmentRoutes);
+        app.use('/services', serviceRoutes);
+        app.use('/working-hours', workingHoursRoutes);
 
         // 404 handler
         app.use('*', (req, res) => {
@@ -56,7 +56,6 @@ async function main() {
         // Start server
         app.listen(env.PORT, () => {
             console.log(`🚀 Server running on port ${env.PORT}`);
-            console.log(`📱 API available at http://localhost:${env.PORT}/api`);
             console.log(`🔍 Health check at http://localhost:${env.PORT}/health`);
         });
 

@@ -1,42 +1,76 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
-import User, { IUser } from '../models/User';
-import { env } from '../env';
+import User from '../models/User';
+import { signAccessToken, signRefreshToken } from '../utils/jwt';
+import { v2 as cloudinary } from 'cloudinary';
+import '../config/cloudinary.js';
 
 // Register new user
 export async function register(req: Request, res: Response) {
     try {
         const { email, password, firstName, lastName, phone, role } = req.body;
-
+        if (!email || !password || !firstName || !lastName || !phone) {
+            return res.status(400).json({ error: 'All fields are required' });
+        }
+        if (password.length < 8) {
+            return res.status(400).json({ error: 'Password must be at least 8 characters long' });
+        }
+        if (phone.length !== 10) {
+            return res.status(400).json({ error: 'Phone number must be 10 digits long' });
+        }
+        if (role !== 'customer' && role !== 'barber' && role !== 'admin') {
+            return res.status(400).json({ error: 'Invalid role' });
+        }
+        if (firstName.length < 3 || lastName.length < 3) {
+            return res.status(400).json({ error: 'First and last name must be at least 3 characters long' });
+        }
+        if (!email.includes('@')) {
+            return res.status(400).json({ error: 'Invalid email' });
+        }
+        if (!phone.startsWith('05')) {
+            return res.status(400).json({ error: 'Phone number must start with 05' });
+        }
         // Check if user already exists
-        const existingUser = await User.findOne({ email });
-        if (existingUser) {
+        const existingEmail = await User.findOne({ email });
+        if (existingEmail) {
             return res.status(400).json({ error: 'User already exists' });
         }
-
-        // Hash password
-        const saltRounds = 12;
-        const hashedPassword = await bcrypt.hash(password, saltRounds);
-
+        const existingPhone = await User.findOne({ phone });
+        if (existingPhone) {
+            return res.status(400).json({ error: 'Phone number already exists' });
+        }
+        const randomProfileImage = `https://api.dicebear.com/7.x/avataaars/svg?seed=${email}`;
+        let profileImageUrl: string | undefined;
+        const file = (req as any).file as Express.Multer.File | undefined;
+        if (file) {
+            const uploadResult: any = await new Promise((resolve, reject) => {
+                const stream = cloudinary.uploader.upload_stream(
+                    { folder: 'barbershop', resource_type: 'image' },
+                    (error, result) => {
+                        if (error) return reject(error);
+                        resolve(result);
+                    }
+                );
+                stream.end(file.buffer);
+            });
+            profileImageUrl = uploadResult.secure_url as string;
+        }
         // Create new user
         const user = new User({
             email,
-            password: hashedPassword,
+            password,
             firstName,
             lastName,
             phone,
-            role: role || 'customer'
+            role: role || 'customer',
+            profileImage: profileImageUrl || randomProfileImage
         });
 
         await user.save();
 
-        // Generate JWT token
-        const token = jwt.sign(
-            { userId: user._id, email: user.email, role: user.role },
-            process.env.JWT_SECRET || 'your-secret-key',
-            { expiresIn: '7d' }
-        );
+        // Generate tokens
+        const accessToken = signAccessToken({ id: String(user._id), email: user.email, role: user.role });
+        const refreshToken = signRefreshToken(String(user._id));
 
         // Return user data without password
         const userResponse = {
@@ -52,9 +86,10 @@ export async function register(req: Request, res: Response) {
         res.status(201).json({
             message: 'User registered successfully',
             user: userResponse,
-            token
+            accessToken,
+            refreshToken
         });
-
+        console.log("User registered successfully", userResponse, "\naccessToken: ", accessToken, "\nrefreshToken: ", refreshToken);
     } catch (error) {
         console.error('Registration error:', error);
         res.status(500).json({ error: 'Internal server error' });
@@ -65,6 +100,9 @@ export async function register(req: Request, res: Response) {
 export async function login(req: Request, res: Response) {
     try {
         const { email, password } = req.body;
+        if (!email || !password) {
+            return res.status(400).json({ error: 'All fields are required' });
+        }
 
         // Find user by email
         const user = await User.findOne({ email });
@@ -83,12 +121,9 @@ export async function login(req: Request, res: Response) {
             return res.status(401).json({ error: 'Invalid credentials' });
         }
 
-        // Generate JWT token
-        const token = jwt.sign(
-            { userId: user._id, email: user.email, role: user.role },
-            process.env.JWT_SECRET || 'your-secret-key',
-            { expiresIn: '7d' }
-        );
+        // Generate tokens
+        const accessToken = signAccessToken({ id: String(user._id), email: user.email, role: user.role });
+        const refreshToken = signRefreshToken(String(user._id));
 
         // Return user data without password
         const userResponse = {
@@ -104,12 +139,36 @@ export async function login(req: Request, res: Response) {
         res.json({
             message: 'Login successful',
             user: userResponse,
-            token
+            accessToken,
+            refreshToken
         });
 
     } catch (error) {
         console.error('Login error:', error);
         res.status(500).json({ error: 'Internal server error' });
+    }
+}
+
+// Refresh access token
+export async function refreshToken(req: Request, res: Response) {
+    try {
+        const { refreshToken } = req.body as { refreshToken?: string };
+        if (!refreshToken) {
+            return res.status(400).json({ error: 'Refresh token is required' });
+        }
+
+        const { verifyRefresh } = await import('../utils/jwt');
+        const payload = verifyRefresh(refreshToken);
+
+        const user = await User.findById(payload.sub);
+        if (!user || !user.isActive) {
+            return res.status(401).json({ error: 'Invalid token or user inactive' });
+        }
+
+        const newAccessToken = signAccessToken({ id: String(user._id), email: user.email, role: user.role });
+        return res.json({ accessToken: newAccessToken });
+    } catch (error) {
+        return res.status(401).json({ error: 'Invalid or expired refresh token' });
     }
 }
 

@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import multer from 'multer';
 import {
     register,
     login,
@@ -7,15 +8,18 @@ import {
     getBarbers,
     getUserById,
     getAllUsers,
-    toggleUserStatus
+    toggleUserStatus,
+    refreshToken
 } from '../controllers/userController';
 import { authenticateToken, requireAdmin } from '../middleware/auth';
 
 const router = Router();
+const upload = multer({ storage: multer.memoryStorage() });
 
 // Public routes
-router.post('/register', register);
+router.post('/register', upload.single('image'), register);
 router.post('/login', login);
+router.post('/refresh', refreshToken);
 router.get('/barbers', getBarbers);
 
 // Protected routes

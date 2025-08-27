@@ -1,4 +1,5 @@
 import { Schema, model } from 'mongoose';
+import bcrypt from 'bcryptjs';
 
 export interface IUser {
     email: string;
@@ -11,6 +12,8 @@ export interface IUser {
     isActive: boolean;
     createdAt: Date;
     updatedAt: Date;
+    refreshTokens: string[]; // אחד לכל מכשיר/דפדפן
+
 }
 
 const userSchema = new Schema<IUser>({
@@ -26,6 +29,7 @@ const userSchema = new Schema<IUser>({
         required: true,
         minlength: 6
     },
+    refreshTokens: { type: [String], default: [] },
     firstName: {
         type: String,
         required: true,
@@ -60,5 +64,13 @@ const userSchema = new Schema<IUser>({
 
 // Index for faster queries - email already has unique index from schema
 userSchema.index({ role: 1 });
+userSchema.pre('save', async function (next) {
+    if (!this.isModified('password')) {
+        next();
+    }
+    const saltRounds = 12;
+    this.password = await bcrypt.hash(this.password, saltRounds);
+    next();
+});
 
 export default model<IUser>('User', userSchema);
