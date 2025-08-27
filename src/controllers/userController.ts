@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import User, { IUser } from '../models/User';
+import { env } from '../env';
 
 // Register new user
 export async function register(req: Request, res: Response) {
@@ -115,7 +116,7 @@ export async function login(req: Request, res: Response) {
 // Get user profile
 export async function getProfile(req: Request, res: Response) {
     try {
-        const userId = (req as any).user?.userId;
+        const userId = (req as any).user?.id;
         if (!userId) {
             return res.status(401).json({ error: 'Unauthorized' });
         }
@@ -135,30 +136,60 @@ export async function getProfile(req: Request, res: Response) {
 // Update user profile
 export async function updateProfile(req: Request, res: Response) {
     try {
-        const userId = (req as any).user?.userId;
-        if (!userId) {
-            return res.status(401).json({ error: 'Unauthorized' });
-        }
+        const userId = (req as any).user.id;
+        const { firstName, lastName, phone, profileImage, currentPassword, newPassword } = req.body;
 
-        const { firstName, lastName, phone, profileImage } = req.body;
-        const updateData: Partial<IUser> = {};
-
-        if (firstName) updateData.firstName = firstName;
-        if (lastName) updateData.lastName = lastName;
-        if (phone) updateData.phone = phone;
-        if (profileImage !== undefined) updateData.profileImage = profileImage;
-
-        const user = await User.findByIdAndUpdate(
-            userId,
-            updateData,
-            { new: true, runValidators: true }
-        ).select('-password');
-
+        // Find user
+        const user = await User.findById(userId);
         if (!user) {
             return res.status(404).json({ error: 'User not found' });
         }
 
-        res.json({ message: 'Profile updated successfully', user });
+        // Update basic info
+        if (firstName) user.firstName = firstName;
+        if (lastName) user.lastName = lastName;
+        if (phone) user.phone = phone;
+        if (profileImage !== undefined) user.profileImage = profileImage;
+
+        // Handle password change if requested
+        if (newPassword) {
+            if (!currentPassword) {
+                return res.status(400).json({ error: 'Current password is required to change password' });
+            }
+
+            // Verify current password
+            const isPasswordValid = await bcrypt.compare(currentPassword, user.password);
+            if (!isPasswordValid) {
+                return res.status(400).json({ error: 'Current password is incorrect' });
+            }
+
+            // Hash new password
+            const saltRounds = 12;
+            user.password = await bcrypt.hash(newPassword, saltRounds);
+        }
+
+        // Save updated user
+        await user.save();
+
+        // Return updated user (without password)
+        const updatedUser = {
+            _id: user._id,
+            email: user.email,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            phone: user.phone,
+            role: user.role,
+            profileImage: user.profileImage,
+            isActive: user.isActive,
+            createdAt: user.createdAt,
+            updatedAt: user.updatedAt
+        };
+
+        res.json({
+            message: 'Profile updated successfully',
+            user: updatedUser
+        });
+
     } catch (error) {
         console.error('Update profile error:', error);
         res.status(500).json({ error: 'Internal server error' });
@@ -176,6 +207,61 @@ export async function getBarbers(req: Request, res: Response) {
         res.json({ barbers });
     } catch (error) {
         console.error('Get barbers error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+}
+
+// Get user by ID (admin only)
+export async function getUserById(req: Request, res: Response) {
+    try {
+        const { userId } = req.params;
+
+        const user = await User.findById(userId).select('-password');
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        res.json({ user });
+    } catch (error) {
+        console.error('Get user by ID error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+}
+
+// Get all users (admin only)
+export async function getAllUsers(req: Request, res: Response) {
+    try {
+        const users = await User.find({}).select('-password').sort({ createdAt: -1 });
+
+        res.json({ users });
+    } catch (error) {
+        console.error('Get all users error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+}
+
+// Deactivate/Activate user (admin only)
+export async function toggleUserStatus(req: Request, res: Response) {
+    try {
+        const { userId } = req.params;
+        const { isActive } = req.body;
+
+        const user = await User.findByIdAndUpdate(
+            userId,
+            { isActive },
+            { new: true, runValidators: true }
+        ).select('-password');
+
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        res.json({
+            message: `User ${isActive ? 'activated' : 'deactivated'} successfully`,
+            user
+        });
+    } catch (error) {
+        console.error('Toggle user status error:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 }

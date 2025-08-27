@@ -4,9 +4,12 @@ import {
     login,
     getProfile,
     updateProfile,
-    getBarbers
+    getBarbers,
+    getUserById,
+    getAllUsers,
+    toggleUserStatus
 } from '../controllers/userController';
-import { authenticateToken } from '../middleware/auth';
+import { authenticateToken, requireAdmin } from '../middleware/auth';
 
 const router = Router();
 
@@ -18,5 +21,10 @@ router.get('/barbers', getBarbers);
 // Protected routes
 router.get('/profile', authenticateToken, getProfile);
 router.put('/profile', authenticateToken, updateProfile);
+
+// Admin only routes
+router.get('/all', authenticateToken, requireAdmin, getAllUsers);
+router.get('/:userId', authenticateToken, requireAdmin, getUserById);
+router.patch('/:userId/status', authenticateToken, requireAdmin, toggleUserStatus);
 
 export default router;
