@@ -46,7 +46,7 @@
   },
   "include": [
     "src",
-    "tests"
+    "tests",
   ], // קבצים ותיקיות לכלול (כולל תיקיית הטסטים)
   "exclude": [
     "node_modules",

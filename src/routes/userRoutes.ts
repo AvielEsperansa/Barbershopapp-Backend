@@ -26,9 +26,11 @@ router.get('/barbers', getBarbers);
 router.get('/profile', authenticateToken, getProfile);
 router.put('/profile', authenticateToken, updateProfile);
 
-// Admin only routes
+// Admin only routes - place specific routes BEFORE dynamic parameter routes
 router.get('/all', authenticateToken, requireAdmin, getAllUsers);
+router.patch('/status/:userId', authenticateToken, requireAdmin, toggleUserStatus);
+
+// Dynamic parameter routes - place LAST to avoid conflicts
 router.get('/:userId', authenticateToken, requireAdmin, getUserById);
-router.patch('/:userId/status', authenticateToken, requireAdmin, toggleUserStatus);
 
 export default router;

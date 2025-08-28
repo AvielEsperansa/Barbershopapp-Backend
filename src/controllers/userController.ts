@@ -3,7 +3,6 @@ import bcrypt from 'bcryptjs';
 import User from '../models/User';
 import { signAccessToken, signRefreshToken } from '../utils/jwt';
 import { v2 as cloudinary } from 'cloudinary';
-import '../config/cloudinary.js';
 
 // Register new user
 export async function register(req: Request, res: Response) {
@@ -142,6 +141,7 @@ export async function login(req: Request, res: Response) {
             accessToken,
             refreshToken
         });
+        console.log("Login successful", userResponse, "\naccessToken: ", accessToken, "\nrefreshToken: ", refreshToken);
 
     } catch (error) {
         console.error('Login error:', error);

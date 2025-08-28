@@ -17,7 +17,7 @@ if (!env.MONGO_URI) {
     console.warn('⚠️  MONGO_URI not set, using default localhost connection');
 }
 
-if (!process.env.JWT_SECRET) {
+if (!process.env.ACCESS_TOKEN_SECRET) {
     console.warn('⚠️  JWT_SECRET not set, using default key (not secure for production)');
 }
 ['MONGO_URI', 'ACCESS_TOKEN_SECRET', 'REFRESH_TOKEN_SECRET'].forEach(k => {
