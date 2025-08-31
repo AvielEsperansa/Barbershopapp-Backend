@@ -7,7 +7,7 @@ import { v2 as cloudinary } from 'cloudinary';
 // Register new user
 export async function register(req: Request, res: Response) {
     try {
-        const { email, password, firstName, lastName, phone, role } = req.body;
+        const { email, password, firstName, lastName, phone } = req.body;
         if (!email || !password || !firstName || !lastName || !phone) {
             return res.status(400).json({ error: 'All fields are required' });
         }
@@ -17,9 +17,7 @@ export async function register(req: Request, res: Response) {
         if (phone.length !== 10) {
             return res.status(400).json({ error: 'Phone number must be 10 digits long' });
         }
-        if (role !== 'customer' && role !== 'barber' && role !== 'admin') {
-            return res.status(400).json({ error: 'Invalid role' });
-        }
+
         if (firstName.length < 3 || lastName.length < 3) {
             return res.status(400).json({ error: 'First and last name must be at least 3 characters long' });
         }
@@ -61,7 +59,6 @@ export async function register(req: Request, res: Response) {
             firstName,
             lastName,
             phone,
-            role: role || 'customer',
             profileImage: profileImageUrl || randomProfileImage
         });
 
@@ -196,7 +193,7 @@ export async function getProfile(req: Request, res: Response) {
 export async function updateProfile(req: Request, res: Response) {
     try {
         const userId = (req as any).user.id;
-        const { firstName, lastName, phone, profileImage, currentPassword, newPassword } = req.body;
+        const { firstName, lastName, email, phone, profileImage, currentPassword, newPassword } = req.body;
 
         // Find user
         const user = await User.findById(userId);
@@ -207,6 +204,7 @@ export async function updateProfile(req: Request, res: Response) {
         // Update basic info
         if (firstName) user.firstName = firstName;
         if (lastName) user.lastName = lastName;
+        if (email) user.email = email;
         if (phone) user.phone = phone;
         if (profileImage !== undefined) user.profileImage = profileImage;
 
@@ -226,7 +224,7 @@ export async function updateProfile(req: Request, res: Response) {
             const saltRounds = 12;
             user.password = await bcrypt.hash(newPassword, saltRounds);
         }
-
+        console.log(user.email);
         // Save updated user
         await user.save();
 
@@ -321,6 +319,69 @@ export async function toggleUserStatus(req: Request, res: Response) {
         });
     } catch (error) {
         console.error('Toggle user status error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+}
+
+// Get user's past appointments
+export async function getPastAppointments(req: Request, res: Response) {
+    try {
+        const userId = (req as any).user?.id;
+        if (!userId) {
+            return res.status(401).json({ error: 'Unauthorized' });
+        }
+
+        // Import Appointment model
+        const Appointment = (await import('../models/Appointment')).default;
+
+        // Get current date to filter past appointments
+        const currentDate = new Date();
+        currentDate.setHours(0, 0, 0, 0);
+
+        // Find past appointments (past dates only)
+        const pastAppointments = await Appointment.find({
+            customer: userId,
+            date: { $lt: currentDate }
+        })
+            .populate('barber', 'firstName lastName profileImage')
+            .populate('service', 'name description price durationMinutes category')
+            .sort({ date: -1, startTime: -1 }) // Sort by date and time descending (most recent first)
+            .lean();
+
+        // Format the response
+        const formattedAppointments = pastAppointments.map((appointment: any) => ({
+            _id: appointment._id,
+            date: appointment.date,
+            startTime: appointment.startTime,
+            endTime: appointment.endTime,
+            totalPrice: appointment.totalPrice,
+            notes: appointment.notes,
+            barber: {
+                _id: appointment.barber._id,
+                firstName: appointment.barber.firstName,
+                lastName: appointment.barber.lastName,
+                profileImage: appointment.barber.profileImage
+            },
+            service: {
+                _id: appointment.service._id,
+                name: appointment.service.name,
+                description: appointment.service.description,
+                price: appointment.service.price,
+                durationMinutes: appointment.service.durationMinutes,
+                category: appointment.service.category
+            },
+            createdAt: appointment.createdAt,
+            updatedAt: appointment.updatedAt
+        }));
+
+        res.json({
+            message: 'Past appointments retrieved successfully',
+            appointments: formattedAppointments,
+            totalCount: formattedAppointments.length
+        });
+
+    } catch (error) {
+        console.error('Get past appointments error:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 }

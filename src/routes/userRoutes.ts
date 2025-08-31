@@ -9,7 +9,8 @@ import {
     getUserById,
     getAllUsers,
     toggleUserStatus,
-    refreshToken
+    refreshToken,
+    getPastAppointments
 } from '../controllers/userController';
 import { authenticateToken, requireAdmin } from '../middleware/auth';
 
@@ -25,6 +26,7 @@ router.get('/barbers', getBarbers);
 // Protected routes
 router.get('/profile', authenticateToken, getProfile);
 router.put('/profile', authenticateToken, updateProfile);
+router.get('/appointments/past', authenticateToken, getPastAppointments);
 
 // Admin only routes - place specific routes BEFORE dynamic parameter routes
 router.get('/all', authenticateToken, requireAdmin, getAllUsers);

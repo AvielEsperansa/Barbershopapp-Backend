@@ -4,7 +4,7 @@ import { verifyAccess, AccessTokenPayload } from '../utils/jwt';
 
 export interface AuthenticatedRequest extends Request {
     user?: {
-        userId: string;
+        id: string;
         email: string;
         role: string;
     };
@@ -33,7 +33,7 @@ export function authenticateToken(req: AuthenticatedRequest, res: Response, next
     try {
         const decoded = verifyAccess(token);
         req.user = {
-            userId: decoded.sub,
+            id: decoded.sub,
             email: decoded.email,
             role: decoded.role
         };

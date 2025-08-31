@@ -3,7 +3,6 @@ import {
     createAppointment,
     getAvailableSlots,
     getUserAppointments,
-    updateAppointmentStatus,
     cancelAppointment
 } from '../controllers/appointmentController';
 import { authenticateToken } from '../middleware/auth';
@@ -19,7 +18,6 @@ router.get('/slots', getAvailableSlots);
 router.get('/my-appointments', getUserAppointments);
 
 // Dynamic routes with more specific patterns
-router.put('/status/:appointmentId', updateAppointmentStatus);
 router.delete('/cancel/:appointmentId', cancelAppointment);
 
 export default router;

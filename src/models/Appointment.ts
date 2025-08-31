@@ -7,7 +7,6 @@ export interface IAppointment {
     date: Date;
     startTime: string; // Format: "HH:MM"
     endTime: string;   // Format: "HH:MM"
-    status: 'pending' | 'confirmed' | 'completed' | 'cancelled' | 'no-show';
     totalPrice: number;
     notes?: string;
     createdAt: Date;
@@ -44,11 +43,6 @@ const appointmentSchema = new Schema<IAppointment>({
         required: true,
         match: /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/
     },
-    status: {
-        type: String,
-        enum: ['pending', 'confirmed', 'completed', 'cancelled', 'no-show'],
-        default: 'pending'
-    },
     totalPrice: {
         type: Number,
         required: true,
@@ -67,6 +61,13 @@ const appointmentSchema = new Schema<IAppointment>({
 appointmentSchema.index({ customer: 1, date: 1 });
 appointmentSchema.index({ barber: 1, date: 1 });
 appointmentSchema.index({ date: 1, startTime: 1 });
-appointmentSchema.index({ status: 1 });
+
+// Unique index to prevent duplicate appointments for same barber, date, and time
+appointmentSchema.index(
+    { barber: 1, date: 1, startTime: 1 },
+    {
+        unique: true
+    }
+);
 
 export default model<IAppointment>('Appointment', appointmentSchema);

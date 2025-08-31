@@ -53,10 +53,11 @@ async function main() {
             });
         });
 
-        // Start server
-        app.listen(env.PORT, () => {
-            console.log(`🚀 Server running on port ${env.PORT}`);
-            console.log(`🔍 Health check at http://localhost:${env.PORT}/health`);
+        // Start server (bind to 0.0.0.0 to allow LAN devices like phones to connect)
+        app.listen(env.PORT, '0.0.0.0', () => {
+            console.log(`🚀 Server running on port ${env.PORT} (listening on 0.0.0.0)`);
+            console.log(`🔍 Health check (local)  -> http://localhost:${env.PORT}/health`);
+            console.log(`📱 Health check (from phone): use http://<your-computer-LAN-IP>:${env.PORT}/health`);
         });
 
     } catch (error) {
