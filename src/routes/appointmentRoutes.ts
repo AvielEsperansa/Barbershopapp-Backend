@@ -1,23 +1,30 @@
-import { Router } from 'express';
+import express from 'express';
+import { authenticateToken } from '../middleware/auth';
 import {
     createAppointment,
     getAvailableSlots,
     getUserAppointments,
-    cancelAppointment
+    cancelAppointment,
+    getBarberAppointmentHistory,
+    getBarberAppointmentStats,
+    getBarberCompletedAppointments
 } from '../controllers/appointmentController';
-import { authenticateToken } from '../middleware/auth';
 
-const router = Router();
+const router = express.Router();
+// Public routes (no authentication required)
+router.get('/slots', getAvailableSlots);
 
-// All routes require authentication
+// Protected routes (authentication required)
 router.use(authenticateToken);
 
-// Specific routes first
+// User routes
 router.post('/', createAppointment);
-router.get('/slots', getAvailableSlots);
-router.get('/my-appointments', getUserAppointments);
+router.get('/', getUserAppointments);
+router.delete('/:appointmentId', cancelAppointment);
 
-// Dynamic routes with more specific patterns
-router.delete('/cancel/:appointmentId', cancelAppointment);
+// Barber routes (public - no authentication required for viewing barber data)
+router.get('/barber/:barberId/history', getBarberAppointmentHistory);
+router.get('/barber/:barberId/stats', getBarberAppointmentStats);
+router.get('/barber/:barberId/completed', getBarberCompletedAppointments);
 
 export default router;

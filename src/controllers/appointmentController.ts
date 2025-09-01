@@ -289,3 +289,282 @@ export async function cancelAppointment(req: Request, res: Response) {
         res.status(500).json({ error: 'Internal server error' });
     }
 }
+
+// Get barber's appointment history
+export async function getBarberAppointmentHistory(req: Request, res: Response) {
+    try {
+        const { barberId } = req.params;
+        const { startDate, endDate, limit = 50, page = 1 } = req.query;
+
+        if (!barberId) {
+            return res.status(400).json({ error: 'Barber ID is required' });
+        }
+
+        // Build filter
+        let filter: any = { barber: barberId };
+
+        // Add date range if provided
+        if (startDate && endDate) {
+            filter.date = {
+                $gte: new Date(startDate as string),
+                $lte: new Date(endDate as string)
+            };
+        }
+
+        // Pagination
+        const skip = (Number(page) - 1) * Number(limit);
+
+        // Get appointments with pagination
+        const appointments = await Appointment.find(filter)
+            .populate('customer', 'firstName lastName email phone')
+            .populate('service', 'name description price durationMinutes category')
+            .sort({ date: -1, startTime: -1 })
+            .skip(skip)
+            .limit(Number(limit))
+            .lean();
+
+        // Get total count for pagination
+        const totalCount = await Appointment.countDocuments(filter);
+
+        // Format response
+        const formattedAppointments = appointments.map((appointment: any) => ({
+            _id: appointment._id,
+            date: appointment.date,
+            startTime: appointment.startTime,
+            endTime: appointment.endTime,
+            totalPrice: appointment.totalPrice,
+            notes: appointment.notes,
+            customer: {
+                _id: appointment.customer._id,
+                firstName: appointment.customer.firstName,
+                lastName: appointment.customer.lastName,
+                email: appointment.customer.email,
+                phone: appointment.customer.phone
+            },
+            service: {
+                _id: appointment.service._id,
+                name: appointment.service.name,
+                description: appointment.service.description,
+                price: appointment.service.price,
+                durationMinutes: appointment.service.durationMinutes,
+                category: appointment.service.category
+            },
+            createdAt: appointment.createdAt,
+            updatedAt: appointment.updatedAt
+        }));
+
+        res.json({
+            message: 'Barber appointment history retrieved successfully',
+            appointments: formattedAppointments,
+            pagination: {
+                currentPage: Number(page),
+                totalPages: Math.ceil(totalCount / Number(limit)),
+                totalCount,
+                limit: Number(limit)
+            }
+        });
+
+    } catch (error) {
+        console.error('Get barber appointment history error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+}
+
+// Get barber's appointment statistics
+export async function getBarberAppointmentStats(req: Request, res: Response) {
+    try {
+        const { barberId } = req.params;
+        const { startDate, endDate } = req.query;
+
+        if (!barberId) {
+            return res.status(400).json({ error: 'Barber ID is required' });
+        }
+
+        // Build date filter
+        let dateFilter: any = {};
+        if (startDate && endDate) {
+            dateFilter = {
+                $gte: new Date(startDate as string),
+                $lte: new Date(endDate as string)
+            };
+        }
+
+        // Get total appointments
+        const totalAppointments = await Appointment.countDocuments({
+            barber: barberId,
+            ...(Object.keys(dateFilter).length > 0 && { date: dateFilter })
+        });
+
+        // Get total revenue
+        const revenueResult = await Appointment.aggregate([
+            {
+                $match: {
+                    barber: new Types.ObjectId(barberId),
+                    ...(Object.keys(dateFilter).length > 0 && { date: dateFilter })
+                }
+            },
+            {
+                $group: {
+                    _id: null,
+                    totalRevenue: { $sum: '$totalPrice' }
+                }
+            }
+        ]);
+
+        const totalRevenue = revenueResult.length > 0 ? revenueResult[0].totalRevenue : 0;
+
+        // Get appointments by month (last 12 months)
+        const monthlyStats = await Appointment.aggregate([
+            {
+                $match: {
+                    barber: new Types.ObjectId(barberId),
+                    date: { $gte: new Date(new Date().getFullYear() - 1, 0, 1) }
+                }
+            },
+            {
+                $group: {
+                    _id: {
+                        year: { $year: '$date' },
+                        month: { $month: '$date' }
+                    },
+                    count: { $sum: 1 },
+                    revenue: { $sum: '$totalPrice' }
+                }
+            },
+            {
+                $sort: { '_id.year': 1, '_id.month': 1 }
+            }
+        ]);
+
+        // Get most popular services
+        const popularServices = await Appointment.aggregate([
+            {
+                $match: {
+                    barber: new Types.ObjectId(barberId),
+                    ...(Object.keys(dateFilter).length > 0 && { date: dateFilter })
+                }
+            },
+            {
+                $group: {
+                    _id: '$service',
+                    count: { $sum: 1 },
+                    totalRevenue: { $sum: '$totalPrice' }
+                }
+            },
+            {
+                $sort: { count: -1 }
+            },
+            {
+                $limit: 5
+            }
+        ]);
+
+        // Populate service details
+        const populatedPopularServices = await Appointment.populate(popularServices, {
+            path: '_id',
+            select: 'name description price durationMinutes category'
+        });
+
+        res.json({
+            message: 'Barber appointment statistics retrieved successfully',
+            stats: {
+                totalAppointments,
+                totalRevenue,
+                monthlyStats,
+                popularServices: populatedPopularServices
+            }
+        });
+
+    } catch (error) {
+        console.error('Get barber appointment stats error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+}
+
+// Get barber's completed appointments (past appointments)
+export async function getBarberCompletedAppointments(req: Request, res: Response) {
+    try {
+        const { barberId } = req.params;
+        const { limit = 50, page = 1 } = req.query;
+
+        if (!barberId) {
+            return res.status(400).json({ error: 'Barber ID is required' });
+        }
+
+        // Get current date and time
+        const currentTime = new Date();
+        const currentDate = new Date(currentTime.getFullYear(), currentTime.getMonth(), currentTime.getDate(), 0, 0, 0, 0);
+        const currentTimeString = currentTime.toTimeString().slice(0, 5);
+
+        // Find completed appointments (past dates + past times today)
+        const filter = {
+            barber: barberId,
+            $or: [
+                { date: { $lt: currentDate } }, // תאריכים שעברו
+                {
+                    date: currentDate,
+                    startTime: { $lt: currentTimeString } // שעות שעברו היום
+                }
+            ]
+        };
+
+        // Pagination
+        const skip = (Number(page) - 1) * Number(limit);
+
+        // Get completed appointments
+        const appointments = await Appointment.find(filter)
+            .populate('customer', 'firstName lastName email phone')
+            .populate('service', 'name description price durationMinutes category')
+            .sort({ date: -1, startTime: -1 })
+            .skip(skip)
+            .limit(Number(limit))
+            .lean();
+
+        // Get total count
+        const totalCount = await Appointment.countDocuments(filter);
+
+        // Format response
+        const formattedAppointments = appointments.map((appointment: any) => ({
+            _id: appointment._id,
+            date: appointment.date,
+            startTime: appointment.startTime,
+            endTime: appointment.endTime,
+            totalPrice: appointment.totalPrice,
+            notes: appointment.notes,
+            customer: {
+                _id: appointment.customer._id,
+                firstName: appointment.customer.firstName,
+                lastName: appointment.customer.lastName,
+                email: appointment.customer.email,
+                phone: appointment.customer.phone
+            },
+            service: {
+                _id: appointment.service._id,
+                name: appointment.service.name,
+                description: appointment.service.description,
+                price: appointment.service.price,
+                durationMinutes: appointment.service.durationMinutes,
+                category: appointment.service.category
+            },
+            createdAt: appointment.createdAt,
+            updatedAt: appointment.updatedAt
+        }));
+
+        res.json({
+            message: 'Barber completed appointments retrieved successfully',
+            appointments: formattedAppointments,
+            pagination: {
+                currentPage: Number(page),
+                totalPages: Math.ceil(totalCount / Number(limit)),
+                totalCount,
+                limit: Number(limit)
+            },
+            currentTime: currentTimeString,
+            currentDate: currentDate.toISOString().split('T')[0]
+        });
+
+    } catch (error) {
+        console.error('Get barber completed appointments error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+}

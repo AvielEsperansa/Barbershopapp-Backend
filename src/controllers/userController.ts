@@ -163,6 +163,7 @@ export async function refreshToken(req: Request, res: Response) {
         }
 
         const newAccessToken = signAccessToken({ id: String(user._id), email: user.email, role: user.role });
+        console.log("New access token generated", newAccessToken);
         return res.json({ accessToken: newAccessToken });
     } catch (error) {
         return res.status(401).json({ error: 'Invalid or expired refresh token' });
@@ -334,14 +335,23 @@ export async function getPastAppointments(req: Request, res: Response) {
         // Import Appointment model
         const Appointment = (await import('../models/Appointment')).default;
 
-        // Get current date to filter past appointments
-        const currentDate = new Date();
-        currentDate.setHours(0, 0, 0, 0);
+        // Get current date and time
+        const currentTime = new Date();
+        const currentDate = new Date(currentTime.getFullYear(), currentTime.getMonth(), currentTime.getDate(), 0, 0, 0, 0); // מנרמל לחצות
+        const currentTimeString = currentTime.toTimeString().slice(0, 5); // פורמט "HH:MM"
 
-        // Find past appointments (past dates only)
+        // Find past appointments:
+        // 1. תאריכים שעברו (לא כולל היום)
+        // 2. היום הנוכחי אבל שעות שעברו
         const pastAppointments = await Appointment.find({
             customer: userId,
-            date: { $lt: currentDate }
+            $or: [
+                { date: { $lt: currentDate } }, // תאריכים שעברו
+                {
+                    date: currentDate,
+                    startTime: { $lt: currentTimeString } // שעות שעברו היום
+                }
+            ]
         })
             .populate('barber', 'firstName lastName profileImage')
             .populate('service', 'name description price durationMinutes category')
@@ -377,7 +387,9 @@ export async function getPastAppointments(req: Request, res: Response) {
         res.json({
             message: 'Past appointments retrieved successfully',
             appointments: formattedAppointments,
-            totalCount: formattedAppointments.length
+            totalCount: formattedAppointments.length,
+            currentTime: currentTimeString,
+            currentDate: currentDate.toISOString().split('T')[0]
         });
 
     } catch (error) {
