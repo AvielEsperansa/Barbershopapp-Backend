@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import User from '../models/User';
+import Appointment from '../models/Appointment';
 import { signAccessToken, signRefreshToken } from '../utils/jwt';
 import { v2 as cloudinary } from 'cloudinary';
 
@@ -331,9 +332,6 @@ export async function getPastAppointments(req: Request, res: Response) {
         if (!userId) {
             return res.status(401).json({ error: 'Unauthorized' });
         }
-
-        // Import Appointment model
-        const Appointment = (await import('../models/Appointment')).default;
 
         // Get current date and time
         const currentTime = new Date();
