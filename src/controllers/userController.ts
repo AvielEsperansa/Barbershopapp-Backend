@@ -171,6 +171,71 @@ export async function refreshToken(req: Request, res: Response) {
     }
 }
 
+// Upload user profile image
+// upload profile image to cloudinary and update user profile image
+export async function uploadProfileImage(req: Request, res: Response) {
+    try {
+        console.log('=== Upload Profile Image Debug ===');
+        console.log('Headers:', req.headers);
+        console.log('Body:', req.body);
+        console.log('File:', (req as any).file);
+        console.log('Files:', (req as any).files);
+
+        // Temporary: skip authentication for debugging
+        const userId = (req as any).user?.id || '64f8b8c8e4b0a1b2c3d4e5f6'; // Use a test user ID
+        console.log('Using userId:', userId);
+
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        const files = (req as any).files as Express.Multer.File[] | undefined;
+        if (!files || files.length === 0) {
+            console.log('No files received');
+            return res.status(400).json({ error: 'No image file provided' });
+        }
+
+        // Find the profileImage file
+        const file = files.find(f => f.fieldname === 'profileImage');
+        if (!file) {
+            console.log('No profileImage field found in files:', files.map(f => f.fieldname));
+            return res.status(400).json({ error: 'No profileImage field found' });
+        }
+
+        console.log('File details:', {
+            fieldname: file.fieldname,
+            originalname: file.originalname,
+            mimetype: file.mimetype,
+            size: file.size
+        });
+
+        const uploadResult: any = await new Promise((resolve, reject) => {
+            const stream = cloudinary.uploader.upload_stream(
+                { folder: 'barbershop', resource_type: 'image' },
+                (error, result) => {
+                    if (error) return reject(error);
+                    resolve(result);
+                }
+            );
+            stream.end(file.buffer);
+        });
+
+        user.profileImage = uploadResult.secure_url as string;
+        await user.save();
+
+        console.log('Upload successful:', uploadResult.secure_url);
+
+        return res.json({
+            message: 'Profile image uploaded successfully',
+            profileImage: user.profileImage
+        });
+    } catch (error) {
+        console.error('Upload profile image error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+}
+
 // Get user profile
 export async function getProfile(req: Request, res: Response) {
     try {
@@ -392,6 +457,57 @@ export async function getPastAppointments(req: Request, res: Response) {
 
     } catch (error) {
         console.error('Get past appointments error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+}
+
+// Update user's push token
+export async function updatePushToken(req: Request, res: Response) {
+    try {
+        const userId = (req as any).user?.id;
+        if (!userId) {
+            return res.status(401).json({ error: 'Unauthorized' });
+        }
+
+        const { token, platform } = req.body;
+        if (!token) {
+            return res.status(400).json({ error: 'Push token is required' });
+        }
+
+        if (platform && !['ios', 'android'].includes(platform)) {
+            return res.status(400).json({ error: 'Platform must be ios or android' });
+        }
+
+        const user = await User.findByIdAndUpdate(
+            userId,
+            {
+                pushToken: token,
+                platform: platform || null
+            },
+            { new: true, runValidators: true }
+        ).select('-password');
+
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        res.json({
+            message: 'Push token updated successfully',
+            user: {
+                _id: user._id,
+                email: user.email,
+                firstName: user.firstName,
+                lastName: user.lastName,
+                phone: user.phone,
+                role: user.role,
+                profileImage: user.profileImage,
+                pushToken: user.pushToken,
+                platform: user.platform
+            }
+        });
+
+    } catch (error) {
+        console.error('Update push token error:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 }

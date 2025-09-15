@@ -13,6 +13,8 @@ export interface IUser {
     createdAt: Date;
     updatedAt: Date;
     refreshTokens: string[]; // אחד לכל מכשיר/דפדפן
+    pushToken?: string; // Expo push token
+    platform?: 'ios' | 'android'; // פלטפורמת המכשיר
 
 }
 
@@ -57,6 +59,15 @@ const userSchema = new Schema<IUser>({
     isActive: {
         type: Boolean,
         default: true
+    },
+    pushToken: {
+        type: String,
+        default: null
+    },
+    platform: {
+        type: String,
+        enum: ['ios', 'android'],
+        default: null
     }
 }, {
     timestamps: true

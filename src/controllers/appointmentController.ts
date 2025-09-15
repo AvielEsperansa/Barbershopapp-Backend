@@ -3,6 +3,7 @@ import Appointment from '../models/Appointment';
 import Service from '../models/Service';
 import WorkingHours from '../models/WorkingHours';
 import { Types } from 'mongoose';
+import notificationService from '../services/notificationService';
 
 // Create new appointment
 export async function createAppointment(req: Request, res: Response) {
@@ -113,6 +114,24 @@ export async function createAppointment(req: Request, res: Response) {
             appointment
         });
         console.log(appointment);
+
+        // שליחת הודעות push
+        try {
+            // הודעה ללקוח על קביעת התור
+            await notificationService.sendAppointmentConfirmation(
+                String(appointment.customer._id),
+                appointment
+            );
+
+            // הודעה לספר על תור חדש
+            await notificationService.sendNewAppointmentToBarber(
+                String(appointment.barber._id),
+                appointment
+            );
+        } catch (notificationError) {
+            console.error('Error sending push notifications:', notificationError);
+            // לא נכשל את הבקשה בגלל שגיאת הודעות
+        }
 
     } catch (error) {
         console.error('Create appointment error:', error);
@@ -277,12 +296,36 @@ export async function cancelAppointment(req: Request, res: Response) {
             return res.status(403).json({ error: 'Not authorized to cancel this appointment' });
         }
 
+        // Populate appointment data for notifications before deletion
+        await appointment.populate([
+            { path: 'customer', select: 'firstName lastName email phone' },
+            { path: 'barber', select: 'firstName lastName' },
+            { path: 'service', select: 'name price durationMinutes' }
+        ]);
+
         // Delete the appointment
         await Appointment.findByIdAndDelete(appointmentId);
 
         res.json({
             message: 'Appointment cancelled successfully'
         });
+
+        // שליחת הודעות push על ביטול התור
+        try {
+            // הודעה ללקוח על ביטול התור
+            await notificationService.sendAppointmentCancellation(
+                String(appointment.customer._id),
+                appointment
+            );
+
+            // הודעה לספר על ביטול התור
+            await notificationService.sendAppointmentCancellation(
+                String(appointment.barber._id),
+                appointment
+            );
+        } catch (notificationError) {
+            console.error('Error sending cancellation notifications:', notificationError);
+        }
 
     } catch (error) {
         console.error('Cancel appointment error:', error);

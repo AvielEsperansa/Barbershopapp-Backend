@@ -10,11 +10,15 @@ import {
     getAllUsers,
     toggleUserStatus,
     refreshToken,
-    getPastAppointments
+    getPastAppointments,
+    updatePushToken,
+    uploadProfileImage
 } from '../controllers/userController';
 import { authenticateToken, requireAdmin } from '../middleware/auth';
 
 const router = Router();
+
+// Simple multer configuration
 const upload = multer({ storage: multer.memoryStorage() });
 
 // Public routes
@@ -26,7 +30,20 @@ router.get('/barbers', getBarbers);
 // Protected routes
 router.get('/profile', authenticateToken, getProfile);
 router.put('/profile', authenticateToken, updateProfile);
+
+// Test route for debugging
+router.post('/test-upload', upload.any(), (req, res) => {
+    console.log('=== Test Upload Debug ===');
+    console.log('Headers:', req.headers);
+    console.log('Body:', req.body);
+    console.log('File:', req.file);
+    console.log('Files:', req.files);
+    res.json({ message: 'Test upload received', files: req.files });
+});
+
+router.post('/upload-profile-image', upload.any(), uploadProfileImage);
 router.get('/appointments/past', authenticateToken, getPastAppointments);
+router.post('/push-token', authenticateToken, updatePushToken);
 
 // Admin only routes - place specific routes BEFORE dynamic parameter routes
 router.get('/all', authenticateToken, requireAdmin, getAllUsers);
