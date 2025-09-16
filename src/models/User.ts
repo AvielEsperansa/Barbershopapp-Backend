@@ -8,7 +8,10 @@ export interface IUser {
     lastName: string;
     phone: string;
     role: 'customer' | 'barber' | 'admin';
-    profileImage?: string;
+    profileImageData?: {
+        url: string | null;
+        publicId: string | null;
+    };
     isActive: boolean;
     createdAt: Date;
     updatedAt: Date;
@@ -52,9 +55,9 @@ const userSchema = new Schema<IUser>({
         enum: ['customer', 'barber', 'admin'],
         default: 'customer'
     },
-    profileImage: {
-        type: String,
-        default: null
+    profileImageData: {
+        url: { type: String, default: null },
+        publicId: { type: String, default: null }
     },
     isActive: {
         type: Boolean,

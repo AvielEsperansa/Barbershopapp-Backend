@@ -12,7 +12,8 @@ import {
     refreshToken,
     getPastAppointments,
     updatePushToken,
-    uploadProfileImage
+    uploadProfileImage,
+    deleteUser
 } from '../controllers/userController';
 import { authenticateToken, requireAdmin } from '../middleware/auth';
 
@@ -22,7 +23,7 @@ const router = Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
 // Public routes
-router.post('/register', upload.single('image'), register);
+router.post('/register', upload.single('profileImage'), register);
 router.post('/login', login);
 router.post('/refresh', refreshToken);
 router.get('/barbers', getBarbers);
@@ -31,23 +32,14 @@ router.get('/barbers', getBarbers);
 router.get('/profile', authenticateToken, getProfile);
 router.put('/profile', authenticateToken, updateProfile);
 
-// Test route for debugging
-router.post('/test-upload', upload.any(), (req, res) => {
-    console.log('=== Test Upload Debug ===');
-    console.log('Headers:', req.headers);
-    console.log('Body:', req.body);
-    console.log('File:', req.file);
-    console.log('Files:', req.files);
-    res.json({ message: 'Test upload received', files: req.files });
-});
-
-router.post('/upload-profile-image', upload.any(), uploadProfileImage);
+router.post('/upload-profile-image', upload.single('profileImage'), uploadProfileImage);
 router.get('/appointments/past', authenticateToken, getPastAppointments);
 router.post('/push-token', authenticateToken, updatePushToken);
 
 // Admin only routes - place specific routes BEFORE dynamic parameter routes
 router.get('/all', authenticateToken, requireAdmin, getAllUsers);
 router.patch('/status/:userId', authenticateToken, requireAdmin, toggleUserStatus);
+router.delete('/:userId', authenticateToken, requireAdmin, deleteUser);
 
 // Dynamic parameter routes - place LAST to avoid conflicts
 router.get('/:userId', authenticateToken, requireAdmin, getUserById);

@@ -2,8 +2,8 @@ import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import User from '../models/User';
 import Appointment from '../models/Appointment';
-import { signAccessToken, signRefreshToken } from '../utils/jwt';
-import { v2 as cloudinary } from 'cloudinary';
+import { signAccessToken, signRefreshToken, verifyAccess } from '../utils/jwt';
+import cloudinary from '../config/cloudinary';
 
 // Register new user
 export async function register(req: Request, res: Response) {
@@ -39,6 +39,7 @@ export async function register(req: Request, res: Response) {
         }
         const randomProfileImage = `https://api.dicebear.com/7.x/avataaars/svg?seed=${email}`;
         let profileImageUrl: string | undefined;
+        let profileImagePublicId: string | null = null;
         const file = (req as any).file as Express.Multer.File | undefined;
         if (file) {
             const uploadResult: any = await new Promise((resolve, reject) => {
@@ -52,6 +53,7 @@ export async function register(req: Request, res: Response) {
                 stream.end(file.buffer);
             });
             profileImageUrl = uploadResult.secure_url as string;
+            profileImagePublicId = uploadResult.public_id as string;
         }
         // Create new user
         const user = new User({
@@ -60,7 +62,10 @@ export async function register(req: Request, res: Response) {
             firstName,
             lastName,
             phone,
-            profileImage: profileImageUrl || randomProfileImage
+            profileImageData: {
+                url: profileImageUrl || randomProfileImage,
+                publicId: profileImagePublicId
+            }
         });
 
         await user.save();
@@ -77,7 +82,7 @@ export async function register(req: Request, res: Response) {
             lastName: user.lastName,
             phone: user.phone,
             role: user.role,
-            profileImage: user.profileImage
+            profileImageData: user.profileImageData
         };
 
         res.status(201).json({
@@ -130,7 +135,7 @@ export async function login(req: Request, res: Response) {
             lastName: user.lastName,
             phone: user.phone,
             role: user.role,
-            profileImage: user.profileImage
+            profileImageData: user.profileImageData
         };
 
         res.json({
@@ -175,66 +180,75 @@ export async function refreshToken(req: Request, res: Response) {
 // upload profile image to cloudinary and update user profile image
 export async function uploadProfileImage(req: Request, res: Response) {
     try {
-        console.log('=== Upload Profile Image Debug ===');
-        console.log('Headers:', req.headers);
-        console.log('Body:', req.body);
-        console.log('File:', (req as any).file);
-        console.log('Files:', (req as any).files);
 
-        // Temporary: skip authentication for debugging
-        const userId = (req as any).user?.id || '64f8b8c8e4b0a1b2c3d4e5f6'; // Use a test user ID
-        console.log('Using userId:', userId);
+        // 1) בדיקת אותנטיקציה דרך טוקן שמגיע מהפרונט
+        const authHeader = req.headers['authorization'] as string | undefined;
+        const headerToken = authHeader && authHeader.startsWith('Bearer ') ? authHeader.slice(7) : undefined;
+        const bodyToken = (req as any).body?.accessToken as string | undefined;
+        const token = headerToken || bodyToken;
+        if (!token) return res.status(401).json({ error: 'Access token required' });
 
+        let userId: string;
+        try {
+            const decoded = verifyAccess(token);
+            userId = decoded.sub;
+        } catch (e) {
+            return res.status(403).json({ error: 'Invalid or expired token' });
+        }
+
+        // 2) שליפת המשתמש
         const user = await User.findById(userId);
-        if (!user) {
-            return res.status(404).json({ error: 'User not found' });
+        if (!user) return res.status(404).json({ error: "User not found" });
+
+        // 3) קבלת הקובץ מ-multer (תומך גם single וגם array)
+        const file: Express.Multer.File | undefined =
+            (req as any).file || ((req as any).files?.[0] as Express.Multer.File | undefined);
+
+        if (!file) return res.status(400).json({ error: "No image file provided" });
+        if (!file.mimetype?.startsWith("image/")) {
+            return res.status(415).json({ error: "Unsupported file type" });
         }
 
-        const files = (req as any).files as Express.Multer.File[] | undefined;
-        if (!files || files.length === 0) {
-            console.log('No files received');
-            return res.status(400).json({ error: 'No image file provided' });
-        }
-
-        // Find the profileImage file
-        const file = files.find(f => f.fieldname === 'profileImage');
-        if (!file) {
-            console.log('No profileImage field found in files:', files.map(f => f.fieldname));
-            return res.status(400).json({ error: 'No profileImage field found' });
-        }
-
-        console.log('File details:', {
-            fieldname: file.fieldname,
-            originalname: file.originalname,
-            mimetype: file.mimetype,
-            size: file.size
-        });
-
-        const uploadResult: any = await new Promise((resolve, reject) => {
+        // 4) העלאה לקלאודינרי (stream מה-buffer)
+        const uploaded = await new Promise<any>((resolve, reject) => {
             const stream = cloudinary.uploader.upload_stream(
-                { folder: 'barbershop', resource_type: 'image' },
-                (error, result) => {
-                    if (error) return reject(error);
+                { folder: "user_profiles", resource_type: "image" },
+                (err, result) => {
+                    if (err || !result) return reject(err || new Error("Upload failed"));
                     resolve(result);
                 }
             );
             stream.end(file.buffer);
         });
 
-        user.profileImage = uploadResult.secure_url as string;
+        // 5) מחיקת תמונה ישנה (אם קיימת)
+        if (user.profileImageData?.publicId) {
+            try {
+                await cloudinary.uploader.destroy(user.profileImageData.publicId);
+            } catch (destroyErr) {
+                console.warn("Failed to destroy old profile image:", destroyErr);
+            }
+        }
+
+        // 6) שמירת הקישורים בשדה התמונה של המשתמש
+        user.profileImageData = {
+            url: uploaded.secure_url,
+            publicId: uploaded.public_id
+        };
         await user.save();
 
-        console.log('Upload successful:', uploadResult.secure_url);
-
-        return res.json({
-            message: 'Profile image uploaded successfully',
-            profileImage: user.profileImage
+        // 7) תשובה
+        return res.status(201).json({
+            message: "Image uploaded and saved",
+            profileImageData: user.profileImageData
         });
-    } catch (error) {
-        console.error('Upload profile image error:', error);
-        res.status(500).json({ error: 'Internal server error' });
+    } catch (e) {
+        console.error(e);
+        return res.status(500).json({ error: "Cloudinary upload failed" });
     }
 }
+
+
 
 // Get user profile
 export async function getProfile(req: Request, res: Response) {
@@ -273,7 +287,13 @@ export async function updateProfile(req: Request, res: Response) {
         if (lastName) user.lastName = lastName;
         if (email) user.email = email;
         if (phone) user.phone = phone;
-        if (profileImage !== undefined) user.profileImage = profileImage;
+        // אם מגיע profileImage (מחרוזת URL) מהקליינט, נשמור אותו כ-url בתוך profileImageData
+        if (typeof profileImage === 'string') {
+            user.profileImageData = {
+                url: profileImage,
+                publicId: user.profileImageData?.publicId || null
+            } as any;
+        }
 
         // Handle password change if requested
         if (newPassword) {
@@ -303,7 +323,7 @@ export async function updateProfile(req: Request, res: Response) {
             lastName: user.lastName,
             phone: user.phone,
             role: user.role,
-            profileImage: user.profileImage,
+            profileImageData: user.profileImageData,
             isActive: user.isActive,
             createdAt: user.createdAt,
             updatedAt: user.updatedAt
@@ -416,7 +436,7 @@ export async function getPastAppointments(req: Request, res: Response) {
                 }
             ]
         })
-            .populate('barber', 'firstName lastName profileImage')
+            .populate('barber', 'firstName lastName profileImageData')
             .populate('service', 'name description price durationMinutes category')
             .sort({ date: -1, startTime: -1 }) // Sort by date and time descending (most recent first)
             .lean();
@@ -433,7 +453,7 @@ export async function getPastAppointments(req: Request, res: Response) {
                 _id: appointment.barber._id,
                 firstName: appointment.barber.firstName,
                 lastName: appointment.barber.lastName,
-                profileImage: appointment.barber.profileImage
+                profileImageData: appointment.barber.profileImageData
             },
             service: {
                 _id: appointment.service._id,
@@ -500,7 +520,7 @@ export async function updatePushToken(req: Request, res: Response) {
                 lastName: user.lastName,
                 phone: user.phone,
                 role: user.role,
-                profileImage: user.profileImage,
+                profileImageData: user.profileImageData,
                 pushToken: user.pushToken,
                 platform: user.platform
             }
@@ -509,5 +529,34 @@ export async function updatePushToken(req: Request, res: Response) {
     } catch (error) {
         console.error('Update push token error:', error);
         res.status(500).json({ error: 'Internal server error' });
+    }
+}
+
+// Delete user (admin only) with Cloudinary cleanup
+export async function deleteUser(req: Request, res: Response) {
+    try {
+        const { userId } = req.params as { userId: string };
+
+        const user = await User.findById(userId);
+        if (!user) {
+            return res.status(404).json({ error: 'User not found' });
+        }
+
+        const publicId = (user as any).profileImageData?.publicId as string | undefined;
+
+        await user.deleteOne();
+
+        if (publicId) {
+            try {
+                await cloudinary.uploader.destroy(publicId);
+            } catch (e) {
+                console.warn('Failed to destroy Cloudinary image on user delete:', e);
+            }
+        }
+
+        return res.json({ message: 'User deleted successfully' });
+    } catch (error) {
+        console.error('Delete user error:', error);
+        return res.status(500).json({ error: 'Internal server error' });
     }
 }
