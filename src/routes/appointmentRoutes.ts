@@ -7,7 +7,9 @@ import {
     cancelAppointment,
     getBarberAppointmentHistory,
     getBarberAppointmentStats,
-    getBarberCompletedAppointments
+    getBarberCompletedAppointments,
+    getBarberCustomers,
+    rescheduleAppointment
 } from '../controllers/appointmentController';
 
 const router = express.Router();
@@ -20,11 +22,13 @@ router.use(authenticateToken);
 // User routes
 router.post('/', createAppointment);
 router.get('/', getUserAppointments);
+router.put('/:appointmentId/reschedule', authenticateToken, rescheduleAppointment);
 router.delete('/:appointmentId', cancelAppointment);
 
 // Barber routes (public - no authentication required for viewing barber data)
 router.get('/barber/:barberId/history', getBarberAppointmentHistory);
 router.get('/barber/:barberId/stats', getBarberAppointmentStats);
 router.get('/barber/:barberId/completed', getBarberCompletedAppointments);
+router.get('/barber/:barberId/customers', getBarberCustomers);
 
 export default router;

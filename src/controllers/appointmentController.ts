@@ -10,7 +10,7 @@ export async function createAppointment(req: Request, res: Response) {
     try {
         const { barberId, serviceId, date, startTime, notes } = req.body;
         const customerId = (req as any).user?.id;
-
+        console.log(date);
         if (!customerId) {
             return res.status(401).json({ error: 'Unauthorized' });
         }
@@ -22,8 +22,10 @@ export async function createAppointment(req: Request, res: Response) {
         }
 
         // נרמל את התאריך לחצות (midnight) כדי שהשדה date יהיה ללא זמן
-        let appointmentDate = new Date(date);
-        appointmentDate = new Date(appointmentDate.getFullYear(), appointmentDate.getMonth(), appointmentDate.getDate(), 0, 0, 0, 0);
+        // Handle date string properly to avoid timezone issues
+        const dateString = date as string;
+        const [year, month, day] = dateString.split('-').map(Number);
+        const appointmentDate = new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0)); // Use UTC to avoid timezone issues
 
         // Calculate end time based on service duration
         const [startHour, startMinute] = startTime.split(':').map(Number);
@@ -35,8 +37,8 @@ export async function createAppointment(req: Request, res: Response) {
 
         // Check if the appointment time has already passed
         const now = new Date();
-        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-        const appointmentDay = new Date(appointmentDate.getFullYear(), appointmentDate.getMonth(), appointmentDate.getDate());
+        const today = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0));
+        const appointmentDay = new Date(Date.UTC(appointmentDate.getFullYear(), appointmentDate.getMonth(), appointmentDate.getDate(), 0, 0, 0, 0));
         const isToday = today.getTime() === appointmentDay.getTime();
 
         if (isToday) {
@@ -149,13 +151,15 @@ export async function getAvailableSlots(req: Request, res: Response) {
         }
 
         // Parse and normalize the selected date to midnight
-        const selectedDate = new Date(date as string);
-        const normalizedDate = new Date(selectedDate.getFullYear(), selectedDate.getMonth(), selectedDate.getDate(), 0, 0, 0, 0);
+        // Handle date string properly to avoid timezone issues
+        const dateString = date as string;
+        const [year, month, day] = dateString.split('-').map(Number);
+        const normalizedDate = new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0)); // Use UTC to avoid timezone issues
         const dayOfWeek = normalizedDate.getDay();
 
         // Get current date and time for comparison
         const now = new Date();
-        const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        const today = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0));
         const isToday = today.getTime() === normalizedDate.getTime();
         const currentTimeString = now.toTimeString().slice(0, 5); // Format: "HH:MM"
 
@@ -536,7 +540,7 @@ export async function getBarberCompletedAppointments(req: Request, res: Response
 
         // Get current date and time
         const currentTime = new Date();
-        const currentDate = new Date(currentTime.getFullYear(), currentTime.getMonth(), currentTime.getDate(), 0, 0, 0, 0);
+        const currentDate = new Date(Date.UTC(currentTime.getFullYear(), currentTime.getMonth(), currentTime.getDate(), 0, 0, 0, 0));
         const currentTimeString = currentTime.toTimeString().slice(0, 5);
 
         // Find completed appointments (past dates + past times today)
@@ -608,6 +612,238 @@ export async function getBarberCompletedAppointments(req: Request, res: Response
 
     } catch (error) {
         console.error('Get barber completed appointments error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+}
+
+// Get all customers of a specific barber (with optional filtering by date)
+export async function getBarberCustomers(req: Request, res: Response) {
+    try {
+        const { barberId } = req.params;
+        const { limit = 50, page = 1, type = 'all' } = req.query; // type: 'all', 'future', 'past', 'today'
+
+        if (!barberId) {
+            return res.status(400).json({ error: 'Barber ID is required' });
+        }
+
+        // Get current date and time
+        const currentTime = new Date();
+        const currentDate = new Date(Date.UTC(currentTime.getFullYear(), currentTime.getMonth(), currentTime.getDate(), 0, 0, 0, 0));
+        const currentTimeString = currentTime.toTimeString().slice(0, 5);
+
+        // Build filter based on type
+        let filter: any = { barber: barberId };
+
+        if (type === 'future') {
+            // Future appointments: future dates + future times today
+            filter = {
+                barber: barberId,
+                $or: [
+                    { date: { $gt: currentDate } }, // תאריכים עתידיים
+                    {
+                        date: currentDate,
+                        startTime: { $gte: currentTimeString } // שעות עתידיות היום
+                    }
+                ]
+            };
+        } else if (type === 'past') {
+            // Past appointments: past dates + past times today
+            filter = {
+                barber: barberId,
+                $or: [
+                    { date: { $lt: currentDate } }, // תאריכים שעברו
+                    {
+                        date: currentDate,
+                        startTime: { $lt: currentTimeString } // שעות שעברו היום
+                    }
+                ]
+            };
+        } else if (type === 'today') {
+            // Today's appointments only
+            filter = {
+                barber: barberId,
+                date: currentDate // רק תאריכים של היום
+            };
+        }
+        // If type === 'all', no additional filter is applied
+
+        // Pagination
+        const skip = (Number(page) - 1) * Number(limit);
+
+        // Get appointments
+        const appointments = await Appointment.find(filter)
+            .populate('customer', 'firstName lastName email phone profileImageData')
+            .populate('service', 'name description price durationMinutes category')
+            .sort({ date: -1, startTime: -1 })
+            .skip(skip)
+            .limit(Number(limit))
+            .lean();
+
+        // Get total count
+        const totalCount = await Appointment.countDocuments(filter);
+
+        // Format response
+        const formattedAppointments = appointments.map((appointment: any) => ({
+            _id: appointment._id,
+            date: appointment.date,
+            startTime: appointment.startTime,
+            endTime: appointment.endTime,
+            totalPrice: appointment.totalPrice,
+            notes: appointment.notes,
+            customer: {
+                _id: appointment.customer._id,
+                firstName: appointment.customer.firstName,
+                lastName: appointment.customer.lastName,
+                email: appointment.customer.email,
+                phone: appointment.customer.phone,
+                profileImageData: appointment.customer.profileImageData
+            },
+            service: {
+                _id: appointment.service._id,
+                name: appointment.service.name,
+                description: appointment.service.description,
+                price: appointment.service.price,
+                durationMinutes: appointment.service.durationMinutes,
+                category: appointment.service.category
+            },
+            createdAt: appointment.createdAt,
+            updatedAt: appointment.updatedAt
+        }));
+
+        res.json({
+            message: `Barber customers (${type}) retrieved successfully`,
+            appointments: formattedAppointments,
+            pagination: {
+                currentPage: Number(page),
+                totalPages: Math.ceil(totalCount / Number(limit)),
+                totalCount,
+                limit: Number(limit)
+            },
+            currentTime: currentTimeString,
+            currentDate: currentDate.toISOString().split('T')[0],
+            filterType: type
+        });
+
+    } catch (error) {
+        console.error('Get barber customers error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+}
+
+// Reschedule appointment to a new time
+export async function rescheduleAppointment(req: Request, res: Response) {
+    try {
+        const { appointmentId } = req.params;
+        const { newStartTime } = req.body;
+        const userId = (req as any).user?.id;
+
+        if (!userId) {
+            return res.status(401).json({ error: 'Unauthorized' });
+        }
+
+        if (!newStartTime) {
+            return res.status(400).json({ error: 'New start time is required' });
+        }
+
+        // Validate time format (HH:MM)
+        const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
+        if (!timeRegex.test(newStartTime)) {
+            return res.status(400).json({ error: 'Invalid time format. Use HH:MM format' });
+        }
+
+        // Find the appointment
+        const appointment = await Appointment.findById(appointmentId)
+            .populate('service', 'durationMinutes')
+            .populate('barber', 'firstName lastName')
+            .populate('customer', 'firstName lastName email phone');
+
+        if (!appointment) {
+            return res.status(404).json({ error: 'Appointment not found' });
+        }
+
+        // Check if user is authorized to reschedule this appointment
+        if (appointment.customer._id.toString() !== userId && appointment.barber._id.toString() !== userId) {
+            return res.status(403).json({ error: 'Not authorized to reschedule this appointment' });
+        }
+
+        // Check if the appointment is in the future
+        const currentTime = new Date();
+        const appointmentDate = new Date(appointment.date);
+        const appointmentDateTime = new Date(appointmentDate);
+        const [startHour, startMinute] = appointment.startTime.split(':').map(Number);
+        appointmentDateTime.setHours(startHour, startMinute, 0, 0);
+
+        if (appointmentDateTime <= currentTime) {
+            return res.status(400).json({ error: 'Cannot reschedule past appointments' });
+        }
+
+        // Calculate new end time based on service duration
+        const [newStartHour, newStartMinute] = newStartTime.split(':').map(Number);
+        const newStartDateTime = new Date(appointmentDate);
+        newStartDateTime.setHours(newStartHour, newStartMinute, 0, 0);
+
+        const newEndDateTime = new Date(newStartDateTime.getTime() + (appointment.service as any).durationMinutes * 60000);
+        const newEndTime = `${newEndDateTime.getHours().toString().padStart(2, '0')}:${newEndDateTime.getMinutes().toString().padStart(2, '0')}`;
+
+        // Check if the new time has already passed (for today)
+        const currentDate = new Date(Date.UTC(currentTime.getFullYear(), currentTime.getMonth(), currentTime.getDate(), 0, 0, 0, 0));
+        const appointmentDay = new Date(Date.UTC(appointmentDate.getFullYear(), appointmentDate.getMonth(), appointmentDate.getDate(), 0, 0, 0, 0));
+        const isToday = currentDate.getTime() === appointmentDay.getTime();
+
+        if (isToday) {
+            const currentTimeString = currentTime.toTimeString().slice(0, 5);
+            if (newStartTime <= currentTimeString) {
+                return res.status(400).json({ error: 'Cannot reschedule to past times' });
+            }
+        }
+
+        // Check for conflicts with existing appointments (excluding current appointment)
+        const conflictingAppointment = await Appointment.findOne({
+            _id: { $ne: appointmentId }, // Exclude current appointment
+            barber: appointment.barber._id,
+            date: appointment.date,
+            $or: [
+                {
+                    startTime: { $lt: newEndTime },
+                    endTime: { $gt: newStartTime }
+                }
+            ]
+        });
+
+        if (conflictingAppointment) {
+            return res.status(400).json({ error: 'הזמן החדש כבר תפוס' });
+        }
+
+        // Update the appointment
+        appointment.startTime = newStartTime;
+        appointment.endTime = newEndTime;
+        await appointment.save();
+
+        // Return updated appointment
+        const updatedAppointment = await Appointment.findById(appointmentId)
+            .populate('customer', 'firstName lastName email phone')
+            .populate('barber', 'firstName lastName')
+            .populate('service', 'name description price durationMinutes category');
+
+        res.json({
+            message: 'Appointment rescheduled successfully',
+            appointment: updatedAppointment
+        });
+
+        // Send push notifications about reschedule
+        try {
+            // Note: sendAppointmentReschedule method needs to be implemented in notificationService
+            console.log('Appointment rescheduled:', {
+                customerId: appointment.customer._id,
+                barberId: appointment.barber._id,
+                newTime: newStartTime
+            });
+        } catch (notificationError) {
+            console.error('Error sending reschedule notifications:', notificationError);
+        }
+
+    } catch (error) {
+        console.error('Reschedule appointment error:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 }

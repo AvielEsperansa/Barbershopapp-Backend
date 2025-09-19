@@ -7,23 +7,26 @@ export async function addDayOff(req: Request, res: Response) {
     try {
         const barberId = (req as any).user?.id;
         const { date, reason, isFullDay = true, startTime, endTime } = req.body;
-
+        console.log(date);
         if (!date) {
-            return res.status(400).json({ error: 'Date is required' });
+            return res.status(400).json({ error: 'תאריך נדרש' });
         }
 
         // בדיקה שהתאריך לא בעבר
-        const selectedDate = new Date(date as string);
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
+        // Handle date string properly to avoid timezone issues
+        const dateString = date as string;
+        const [year, month, day] = dateString.split('-').map(Number);
+        const selectedDate = new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0)); // Use UTC to avoid timezone issues
+        console.log(selectedDate);
+        const today = new Date(Date.UTC(new Date().getFullYear(), new Date().getMonth(), new Date().getDate(), 0, 0, 0, 0));
 
         if (selectedDate < today) {
-            return res.status(400).json({ error: 'Cannot set day off for past dates' });
+            return res.status(400).json({ error: 'לא ניתן לקבוע יום חופש לתאריכים שעברו' });
         }
 
         // אם זה לא יום מלא, צריך שעות התחלה וסיום
         if (!isFullDay && (!startTime || !endTime)) {
-            return res.status(400).json({ error: 'Start time and end time are required for partial day off' });
+            return res.status(400).json({ error: 'שעת התחלה ושעת סיום נדרשות ליום חופש חלקי' });
         }
 
         // בדיקה שאין כבר יום חופש באותו תאריך
@@ -33,7 +36,28 @@ export async function addDayOff(req: Request, res: Response) {
         });
 
         if (existingDayOff) {
-            return res.status(400).json({ error: 'Day off already exists for this date' });
+            // אם יש כבר יום חופש מלא באותו תאריך
+            if (existingDayOff.isFullDay) {
+                return res.status(400).json({ error: 'קיים כבר יום חופש מלא בתאריך זה' });
+            }
+
+            // אם יש יום חופש חלקי ואנחנו מנסים להוסיף יום מלא
+            if (isFullDay) {
+                return res.status(400).json({ error: 'קיים כבר יום חופש חלקי בתאריך זה. לא ניתן להוסיף יום חופש מלא' });
+            }
+
+            // אם יש יום חופש חלקי ואנחנו מנסים להוסיף עוד יום חלקי - בדוק התנגשות שעות
+            if (!isFullDay && existingDayOff.startTime && existingDayOff.endTime) {
+                const existingStart = existingDayOff.startTime;
+                const existingEnd = existingDayOff.endTime;
+
+                // בדיקה אם יש התנגשות בשעות
+                if ((startTime < existingEnd && endTime > existingStart)) {
+                    return res.status(400).json({
+                        error: `התנגשות שעות עם יום חופש קיים (${existingStart} - ${existingEnd}). אנא בחר שעות אחרות.`
+                    });
+                }
+            }
         }
 
         const dayOff = new DayOff({
@@ -48,13 +72,13 @@ export async function addDayOff(req: Request, res: Response) {
         await dayOff.save();
 
         res.status(201).json({
-            message: 'Day off added successfully',
+            message: 'יום חופש נוסף בהצלחה',
             dayOff
         });
 
     } catch (error) {
         console.error('Add day off error:', error);
-        res.status(500).json({ error: 'Internal server error' });
+        res.status(500).json({ error: 'שגיאת שרת פנימית' });
     }
 }
 
@@ -80,7 +104,7 @@ export async function getBarberDaysOff(req: Request, res: Response) {
 
     } catch (error) {
         console.error('Get days off error:', error);
-        res.status(500).json({ error: 'Internal server error' });
+        res.status(500).json({ error: 'שגיאת שרת פנימית' });
     }
 }
 
@@ -90,7 +114,7 @@ export async function getBarberDaysOffPublic(req: Request, res: Response) {
         const { barberId, startDate, endDate } = req.query;
 
         if (!barberId) {
-            return res.status(400).json({ error: 'Barber ID is required' });
+            return res.status(400).json({ error: 'מזהה ספר נדרש' });
         }
 
         let filter: any = { barber: barberId };
@@ -114,7 +138,7 @@ export async function getBarberDaysOffPublic(req: Request, res: Response) {
 
     } catch (error) {
         console.error('Get public days off error:', error);
-        res.status(500).json({ error: 'Internal server error' });
+        res.status(500).json({ error: 'שגיאת שרת פנימית' });
     }
 }
 
@@ -130,14 +154,14 @@ export async function deleteDayOff(req: Request, res: Response) {
         });
 
         if (!dayOff) {
-            return res.status(404).json({ error: 'Day off not found' });
+            return res.status(404).json({ error: 'יום חופש לא נמצא' });
         }
 
-        res.json({ message: 'Day off deleted successfully' });
+        res.json({ message: 'יום חופש נמחק בהצלחה' });
 
     } catch (error) {
         console.error('Delete day off error:', error);
-        res.status(500).json({ error: 'Internal server error' });
+        res.status(500).json({ error: 'שגיאת שרת פנימית' });
     }
 }
 
@@ -154,7 +178,7 @@ export async function updateDayOff(req: Request, res: Response) {
         });
 
         if (!dayOff) {
-            return res.status(404).json({ error: 'Day off not found' });
+            return res.status(404).json({ error: 'יום חופש לא נמצא' });
         }
 
         // עדכון השדות
@@ -166,12 +190,12 @@ export async function updateDayOff(req: Request, res: Response) {
         await dayOff.save();
 
         res.json({
-            message: 'Day off updated successfully',
+            message: 'יום חופש עודכן בהצלחה',
             dayOff
         });
 
     } catch (error) {
         console.error('Update day off error:', error);
-        res.status(500).json({ error: 'Internal server error' });
+        res.status(500).json({ error: 'שגיאת שרת פנימית' });
     }
 }
