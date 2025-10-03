@@ -5,7 +5,7 @@ import User from '../models/User';
 const expo = new Expo();
 
 export interface NotificationData {
-    type: 'appointment_confirmation' | 'appointment_cancellation' | 'appointment_update' | 'appointment_reminder' | 'barber_day_off' | 'new_appointment';
+    type: 'appointment_confirmation' | 'appointment_cancellation' | 'appointment_update' | 'appointment_reminder' | 'barber_day_off' | 'new_appointment' | 'rating_reminder';
     appointmentId?: string;
     dayOffId?: string;
     oldAppointment?: any;
@@ -204,6 +204,23 @@ class NotificationService {
             }
         });
     }
+
+    async sendRatingReminder(customerId: string, appointmentData: any): Promise<boolean> {
+        const { barber, service, date, startTime } = appointmentData;
+        const barberName = `${barber.firstName} ${barber.lastName}`;
+        const serviceName = service.name;
+        const appointmentDate = new Date(date).toLocaleDateString('he-IL');
+
+        return await this.sendToUser(customerId, {
+            title: 'איך הייתה התספורת? ⭐',
+            body: `התספורת שלך עם ${barberName} ב-${appointmentDate} בשעה ${startTime} הושלמה. אנא דרג את השירות!`,
+            data: {
+                type: 'rating_reminder',
+                appointmentId: appointmentData._id,
+            }
+        });
+    }
+
 
     /**
      * הודעות על ימי חופש

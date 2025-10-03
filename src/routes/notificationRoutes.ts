@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import {
     sendAppointmentReminders,
+    sendRatingReminders,
     sendCustomNotification,
     sendNotificationToAllBarbers,
     sendNotificationToAllCustomers,
@@ -12,6 +13,7 @@ const router = Router();
 
 // Admin only routes
 router.post('/reminders', authenticateToken, requireAdmin, sendAppointmentReminders);
+router.post('/rating-reminders', authenticateToken, requireAdmin, sendRatingReminders);
 router.post('/custom', authenticateToken, requireAdmin, sendCustomNotification);
 router.post('/barbers', authenticateToken, requireAdmin, sendNotificationToAllBarbers);
 router.post('/customers', authenticateToken, requireAdmin, sendNotificationToAllCustomers);

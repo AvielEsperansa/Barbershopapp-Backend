@@ -8,6 +8,7 @@ import serviceRoutes from './routes/servicesRoutes';
 import workingHoursRoutes from './routes/workingHoursRoutes';
 import dayOffRoutes from './routes/dayOffRoutes';
 import notificationRoutes from './routes/notificationRoutes';
+import ratingRoutes from './routes/ratingRoutes';
 
 async function main() {
     try {
@@ -39,6 +40,7 @@ async function main() {
         app.use('/working-hours', workingHoursRoutes);
         app.use('/day-off', dayOffRoutes);
         app.use('/notifications', notificationRoutes);
+        app.use('/ratings', ratingRoutes);
 
         // 404 handler
         app.use((req, res) => {

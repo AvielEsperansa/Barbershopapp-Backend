@@ -1,5 +1,5 @@
 import express from 'express';
-import { authenticateToken } from '../middleware/auth';
+import { authenticateToken, requireBarber } from '../middleware/auth';
 import {
     createAppointment,
     getAvailableSlots,
@@ -29,6 +29,6 @@ router.delete('/:appointmentId', cancelAppointment);
 router.get('/barber/:barberId/history', getBarberAppointmentHistory);
 router.get('/barber/:barberId/stats', getBarberAppointmentStats);
 router.get('/barber/:barberId/completed', getBarberCompletedAppointments);
-router.get('/barber/:barberId/customers', getBarberCustomers);
+router.get('/barber/customers', requireBarber, getBarberCustomers);
 
 export default router;

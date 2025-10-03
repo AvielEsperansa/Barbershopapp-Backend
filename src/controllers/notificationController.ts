@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import Appointment from '../models/Appointment';
+import Rating from '../models/Rating';
 import notificationService from '../services/notificationService';
 
 // שליחת תזכורות תורים (24 שעות לפני התור)
@@ -50,6 +51,90 @@ export async function sendAppointmentReminders(req: Request, res: Response) {
 
     } catch (error) {
         console.error('Send appointment reminders error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+}
+
+// Send rating reminders for completed appointments
+export async function sendRatingReminders(req: Request, res: Response) {
+    try {
+        const currentTime = new Date();
+
+        // Find appointments that ended in the last 2 hours (to give time for completion)
+        const twoHoursAgo = new Date(currentTime.getTime() - 2 * 60 * 60 * 1000);
+
+        // Get appointments that have passed
+        const completedAppointments = await Appointment.find({
+            $or: [
+                { date: { $lt: new Date(currentTime.getFullYear(), currentTime.getMonth(), currentTime.getDate()) } }, // Past dates
+                {
+                    date: new Date(currentTime.getFullYear(), currentTime.getMonth(), currentTime.getDate()),
+                    startTime: { $lt: currentTime.toTimeString().slice(0, 5) } // Past times today
+                }
+            ]
+        })
+            .populate('customer', 'firstName lastName')
+            .populate('barber', 'firstName lastName')
+            .populate('service', 'name durationMinutes');
+
+        // Filter appointments that ended in the last 2 hours
+        const recentCompletedAppointments = completedAppointments.filter(appointment => {
+            const appointmentDate = new Date(appointment.date);
+            const [startHour, startMinute] = appointment.startTime.split(':').map(Number);
+            const [endHour, endMinute] = appointment.endTime.split(':').map(Number);
+
+            const appointmentStartTime = new Date(appointmentDate);
+            appointmentStartTime.setHours(startHour, startMinute, 0, 0);
+
+            const appointmentEndTime = new Date(appointmentDate);
+            appointmentEndTime.setHours(endHour, endMinute, 0, 0);
+
+            return appointmentEndTime <= currentTime && appointmentEndTime >= twoHoursAgo;
+        });
+
+        let successCount = 0;
+        let failedCount = 0;
+
+        // Check which appointments already have ratings
+        const appointmentIds = recentCompletedAppointments.map(apt => apt._id);
+        const existingRatings = await Rating.find({
+            appointment: { $in: appointmentIds }
+        }).select('appointment');
+
+        const ratedAppointmentIds = new Set(existingRatings.map((rating: any) => rating.appointment.toString()));
+
+        // Send rating reminders for appointments without ratings
+        for (const appointment of recentCompletedAppointments) {
+            if (!ratedAppointmentIds.has(appointment._id.toString())) {
+                try {
+                    const success = await notificationService.sendRatingReminder(
+                        String(appointment.customer._id),
+                        appointment
+                    );
+
+                    if (success) {
+                        successCount++;
+                    } else {
+                        failedCount++;
+                    }
+                } catch (error) {
+                    console.error(`Error sending rating reminder for appointment ${appointment._id}:`, error);
+                    failedCount++;
+                }
+            }
+        }
+
+        res.json({
+            message: 'Rating reminders sent',
+            totalAppointments: recentCompletedAppointments.length,
+            appointmentsWithRatings: ratedAppointmentIds.size,
+            appointmentsWithoutRatings: recentCompletedAppointments.length - ratedAppointmentIds.size,
+            successCount,
+            failedCount
+        });
+
+    } catch (error) {
+        console.error('Send rating reminders error:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 }

@@ -10,7 +10,15 @@ export async function createAppointment(req: Request, res: Response) {
     try {
         const { barberId, serviceId, date, startTime, notes } = req.body;
         const customerId = (req as any).user?.id;
-        console.log(date);
+
+        console.log('Create appointment request:', {
+            barberId,
+            serviceId,
+            date,
+            startTime,
+            notes,
+            customerId
+        });
         if (!customerId) {
             return res.status(401).json({ error: 'Unauthorized' });
         }
@@ -24,11 +32,66 @@ export async function createAppointment(req: Request, res: Response) {
         // נרמל את התאריך לחצות (midnight) כדי שהשדה date יהיה ללא זמן
         // Handle date string properly to avoid timezone issues
         const dateString = date as string;
-        const [year, month, day] = dateString.split('-').map(Number);
-        const appointmentDate = new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0)); // Use UTC to avoid timezone issues
+
+        // Validate date format
+        if (!dateString || typeof dateString !== 'string') {
+            return res.status(400).json({ error: 'Invalid date format' });
+        }
+
+        let appointmentDate: Date;
+
+        // Handle different date formats
+        if (dateString.includes('T')) {
+            // ISO format: 2025-09-24T09:00:00.000Z
+            appointmentDate = new Date(dateString);
+            if (isNaN(appointmentDate.getTime())) {
+                return res.status(400).json({ error: 'Invalid ISO date format' });
+            }
+            // Convert to UTC midnight
+            appointmentDate = new Date(Date.UTC(
+                appointmentDate.getUTCFullYear(),
+                appointmentDate.getUTCMonth(),
+                appointmentDate.getUTCDate(),
+                0, 0, 0, 0
+            ));
+        } else {
+            // YYYY-MM-DD format
+            const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+            if (!dateRegex.test(dateString)) {
+                return res.status(400).json({ error: 'Date must be in YYYY-MM-DD format' });
+            }
+
+            const [year, month, day] = dateString.split('-').map(Number);
+
+            // Validate date components
+            if (isNaN(year) || isNaN(month) || isNaN(day)) {
+                return res.status(400).json({ error: 'Invalid date components' });
+            }
+
+            if (month < 1 || month > 12 || day < 1 || day > 31) {
+                return res.status(400).json({ error: 'Invalid date values' });
+            }
+
+            appointmentDate = new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0));
+        }
+
+        // Validate that the date is valid
+        if (isNaN(appointmentDate.getTime())) {
+            return res.status(400).json({ error: 'Invalid date provided' });
+        }
 
         // Calculate end time based on service duration
         const [startHour, startMinute] = startTime.split(':').map(Number);
+
+        // Validate start time format
+        if (isNaN(startHour) || isNaN(startMinute)) {
+            return res.status(400).json({ error: 'Invalid start time format' });
+        }
+
+        if (startHour < 0 || startHour > 23 || startMinute < 0 || startMinute > 59) {
+            return res.status(400).json({ error: 'Invalid start time values' });
+        }
+
         const startDateTime = new Date(appointmentDate);
         startDateTime.setHours(startHour, startMinute, 0, 0);
 
@@ -616,14 +679,15 @@ export async function getBarberCompletedAppointments(req: Request, res: Response
     }
 }
 
-// Get all customers of a specific barber (with optional filtering by date)
+// Get all customers of a specific barber with their appointments grouped by customer
 export async function getBarberCustomers(req: Request, res: Response) {
     try {
-        const { barberId } = req.params;
+        // Get barberId from the authenticated user (from token)
+        const barberId = (req as any).user?.id;
         const { limit = 50, page = 1, type = 'all' } = req.query; // type: 'all', 'future', 'past', 'today'
 
         if (!barberId) {
-            return res.status(400).json({ error: 'Barber ID is required' });
+            return res.status(400).json({ error: 'Barber ID not found in token' });
         }
 
         // Get current date and time
@@ -667,57 +731,69 @@ export async function getBarberCustomers(req: Request, res: Response) {
         }
         // If type === 'all', no additional filter is applied
 
-        // Pagination
-        const skip = (Number(page) - 1) * Number(limit);
-
-        // Get appointments
+        // Get all appointments for this barber (without pagination for grouping)
         const appointments = await Appointment.find(filter)
             .populate('customer', 'firstName lastName email phone profileImageData')
             .populate('service', 'name description price durationMinutes category')
             .sort({ date: -1, startTime: -1 })
-            .skip(skip)
-            .limit(Number(limit))
             .lean();
 
-        // Get total count
-        const totalCount = await Appointment.countDocuments(filter);
+        // Group appointments by customer
+        const customersMap = new Map();
 
-        // Format response
-        const formattedAppointments = appointments.map((appointment: any) => ({
-            _id: appointment._id,
-            date: appointment.date,
-            startTime: appointment.startTime,
-            endTime: appointment.endTime,
-            totalPrice: appointment.totalPrice,
-            notes: appointment.notes,
-            customer: {
-                _id: appointment.customer._id,
-                firstName: appointment.customer.firstName,
-                lastName: appointment.customer.lastName,
-                email: appointment.customer.email,
-                phone: appointment.customer.phone,
-                profileImageData: appointment.customer.profileImageData
-            },
-            service: {
-                _id: appointment.service._id,
-                name: appointment.service.name,
-                description: appointment.service.description,
-                price: appointment.service.price,
-                durationMinutes: appointment.service.durationMinutes,
-                category: appointment.service.category
-            },
-            createdAt: appointment.createdAt,
-            updatedAt: appointment.updatedAt
-        }));
+        appointments.forEach((appointment: any) => {
+            const customerId = appointment.customer._id.toString();
+
+            if (!customersMap.has(customerId)) {
+                customersMap.set(customerId, {
+                    customer: {
+                        _id: appointment.customer._id,
+                        firstName: appointment.customer.firstName,
+                        lastName: appointment.customer.lastName,
+                        email: appointment.customer.email,
+                        phone: appointment.customer.phone,
+                        profileImageData: appointment.customer.profileImageData
+                    },
+                    appointments: []
+                });
+            }
+
+            // Add appointment to customer's appointments array
+            customersMap.get(customerId).appointments.push({
+                _id: appointment._id,
+                date: appointment.date,
+                startTime: appointment.startTime,
+                endTime: appointment.endTime,
+                totalPrice: appointment.totalPrice,
+                notes: appointment.notes,
+                service: {
+                    _id: appointment.service._id,
+                    name: appointment.service.name,
+                    description: appointment.service.description,
+                    price: appointment.service.price,
+                    durationMinutes: appointment.service.durationMinutes,
+                    category: appointment.service.category
+                },
+                createdAt: appointment.createdAt,
+                updatedAt: appointment.updatedAt
+            });
+        });
+
+        // Convert map to array
+        const customers = Array.from(customersMap.values());
+
+        // Apply pagination to customers
+        const skip = (Number(page) - 1) * Number(limit);
+        const paginatedCustomers = customers.slice(skip, skip + Number(limit));
 
         res.json({
             message: `Barber customers (${type}) retrieved successfully`,
-            appointments: formattedAppointments,
+            customers: paginatedCustomers,
             pagination: {
                 currentPage: Number(page),
-                totalPages: Math.ceil(totalCount / Number(limit)),
-                totalCount,
-                limit: Number(limit)
+                totalPages: Math.ceil(customers.length / Number(limit)),
+                totalItems: customers.length,
+                itemsPerPage: Number(limit)
             },
             currentTime: currentTimeString,
             currentDate: currentDate.toISOString().split('T')[0],

@@ -31,11 +31,27 @@ export function authenticateToken(req: AuthenticatedRequest, res: Response, next
     }
 
     try {
-        const decoded = verifyAccess(token);
+        // בדיקה אם זה טוקן Cron
+        const JWT_SECRET = process.env.JWT_SECRET || 'your-super-secret-jwt-key';
+        const decoded = jwt.verify(token, JWT_SECRET) as any;
+
+        if (decoded.type === 'cron-service' && decoded.role === 'admin') {
+            // טוקן Cron - מאפשר גישה מלאה
+            req.user = {
+                id: decoded.id,
+                email: 'cron-service@barbershop.com',
+                role: 'admin'
+            };
+            next();
+            return;
+        }
+
+        // טוקן רגיל
+        const payload = verifyAccess(token);
         req.user = {
-            id: decoded.sub,
-            email: decoded.email,
-            role: decoded.role
+            id: payload.sub,
+            email: payload.email,
+            role: payload.role
         };
         next();
     } catch (error) {
